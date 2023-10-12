@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import numpy as np
 
 # hyperparameters
 batch_size = 32 # how many independant sequences will be processed in parallel?
 block_size  = 64 # what is the maximum context length for predictions?
-max_iters = 10000
+max_iters = 5000
 eval_interval = 500
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -13,8 +14,8 @@ print(f"using device: {device}")
 eval_iters = 200
 n_embd = 128
 dropout = 0.2
-n_layer = 8
-n_head = 8
+n_layer = 4
+n_head = 4
 #-----------------
 
 
@@ -62,6 +63,20 @@ def estimate_loss():
         out[split] = losses.mean()
     model.train()
     return out
+
+def get_positional_encoding(sequnece_length):
+    """
+    Compute positional encoding for a particular position.
+    """
+    pos_encoding = torch.zeros((sequnece_length, n_embd), device=device)
+    positions = torch.arange(sequnece_length)[:, None]
+    div_term = torch.exp(-2 * torch.arange(0., n_embd, 2) * np.log(10000.0) / n_embd)
+    
+    pos_encoding[:, 0::2] = torch.sin(positions * div_term)
+    pos_encoding[:, 1::2] = torch.cos(positions * div_term)
+    
+    return pos_encoding
+
 
 class MultiHeadAttention(nn.Module):
     #multiple heads of self-attention in parallel
@@ -145,7 +160,6 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         #each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)]
         )
         self.ln_f = nn.LayerNorm(n_embd)
@@ -155,7 +169,7 @@ class BigramLanguageModel(nn.Module):
         B, T = idx.shape
         # idx and targets are both (B, T) tensor if integers
         tok_emb = self.token_embedding_table(idx) # (B, T, C)
-        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T, C)
+        pos_emb = get_positional_encoding(T) # (T, C)
         x = tok_emb + pos_emb # (B, T, C)
         x = self.blocks(x)
         logits = self.lm_head(x)
